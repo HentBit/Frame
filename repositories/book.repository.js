@@ -1,4 +1,4 @@
-const { BOOKS } = require('#data/books.data');
+import { BOOKS } from "#data/books.data";
 
 const bookRepository = {
   getAll: () => BOOKS,
@@ -20,7 +20,7 @@ const bookRepository = {
     if (index === -1) return false;
     BOOKS.splice(index, 1);
     return true;
-  },
+  }
 };
 
-module.exports = bookRepository;
+export default bookRepository;

@@ -1,66 +1,44 @@
-const { createServer } = require('node:http');
-const config = require('./config');
-const router = require('#routes/book.routes');
+import Fastify from "fastify";
+import fastifyEnv from "@fastify/env";
+import fastifySensible from "@fastify/sensible";
+import fastifyCors from "@fastify/cors";
+import fastifyHelmet from "@fastify/helmet";
+import { envSchema } from "#schemas/env.schema";
+import bookRoutes from "#routes/book.routes";
 
-let isShuttingDown = false;
-let server;
+export const buildApp = async () => {
+  // eslint-disable-next-line no-process-env
+  const isProd = process.env.NODE_ENV === "production";
 
-function gracefulShutdown(signal) {
-  if (isShuttingDown) return;
-  isShuttingDown = true;
+  const fastify = Fastify({
+    logger: {
+      level: isProd ? "error" : "info",
+      transport: !isProd ? { target: "pino-pretty" } : undefined
+    }
+  });
 
-  console.log(
-    `\n[SHUTDOWN] Отримано сигнал ${signal}. Починаємо Graceful Shutdown...`
-  );
+  await fastify.register(fastifyEnv, { schema: envSchema, dotenv: true });
+  await fastify.register(fastifyHelmet, { global: true });
 
-  const timeout = setTimeout(() => {
-    console.error(
-      '[SHUTDOWN] Сервер не встиг закритись за 10с. Завершуємо примусово.'
-    );
-    process.exit(1);
-  }, 10000);
+  await fastify.register(fastifyCors, {
+    origin:
+      fastify.config.NODE_ENV === "production" ? "https://example.com" : "*",
+    methods: ["GET", "POST", "PATCH", "DELETE"]
+  });
 
-  timeout.unref();
+  await fastify.register(fastifySensible);
 
-  if (server) {
-    server.close((err) => {
-      if (err) {
-        console.error(
-          `[SHUTDOWN] Помилка під час закриття сервера: ${err.message}`
-        );
-        process.exit(1);
-      }
-      console.log(
-        '[SHUTDOWN] Усі підключення закрито. Сервер успішно зупинено.'
-      );
-      process.exit(0);
+  fastify.setErrorHandler((error, request, reply) => {
+    request.log.error({ err: error });
+    const statusCode = error.statusCode ?? 500;
+    return reply.status(statusCode).send({
+      statusCode,
+      error: error.name,
+      message: error.message
     });
-  } else {
-    process.exit(0);
-  }
-}
+  });
 
-server = createServer(router);
+  await fastify.register(bookRoutes);
 
-server.listen(config.PORT, config.HOSTNAME, () => {
-  console.log(
-    `[START] Сервер працює на http://${config.HOSTNAME}:${config.PORT}/ у режимі [${config.NODE_ENV}]`
-  );
-});
-
-process.on('SIGINT', () => {
-  gracefulShutdown('SIGINT');
-});
-process.on('SIGTERM', () => {
-  gracefulShutdown('SIGTERM');
-});
-
-process.on('uncaughtException', (err) => {
-  console.error(`[CRITICAL] Uncaught Exception: ${err.message}\n${err.stack}`);
-  gracefulShutdown('uncaughtException');
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error(`[CRITICAL] Unhandled Rejection. Причина: ${reason}`);
-  gracefulShutdown('unhandledRejection');
-});
+  return fastify;
+};

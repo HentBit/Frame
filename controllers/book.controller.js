@@ -1,117 +1,64 @@
-const bookRepository = require('#repositories/book.repository');
-const logger = require('#utils/logger');
-const {
-  validateBook,
-  validatePatchBook,
-} = require('#validators/book.validator');
+import bookRepository from "#repositories/book.repository";
+import { MESSAGES } from "#constants/messages";
 
 const bookController = {
-  getHealth: (req, res) => {
-    const healthData = {
+  getHealth: async (request, reply) => {
+    return reply.send({ status: "ok" });
+  },
+
+  getHealthDetails: async (request, reply) => {
+    return reply.send({
       pid: process.pid,
       nodeVersion: process.version,
       platform: process.platform,
       uptime: Math.floor(process.uptime()),
-      memoryUsage: process.memoryUsage(),
-    };
-    res.statusCode = 200;
-    logger('INFO', req.method, req.url, 200);
-    res.end(JSON.stringify(healthData));
+      memoryUsage: process.memoryUsage()
+    });
   },
 
-  getBooks: (req, res, parsedUrl) => {
-    const authorParam = parsedUrl.searchParams.get('author');
+  getBooks: async (request, reply) => {
+    const { author } = request.query;
     let results = bookRepository.getAll();
 
-    if (authorParam) {
+    if (author) {
       results = results.filter(
-        (book) => book.author.toLowerCase() === authorParam.toLowerCase()
+        (book) => book.author.toLowerCase() === author.toLowerCase()
       );
     }
 
-    res.statusCode = 200;
-    logger('INFO', req.method, req.url, 200);
-    res.end(JSON.stringify({ count: results.length, items: results }));
+    return reply.send({ count: results.length, items: results });
   },
 
-  createBook: (req, res, body) => {
-    try {
-      const data = JSON.parse(body);
-      const isValid = validateBook(data);
+  createBook: async (request, reply) => {
+    const newBook = bookRepository.create(request.body);
+    return reply.status(201).send({ message: "Created", book: newBook });
+  },
 
-      if (!isValid) {
-        res.statusCode = 400;
-        logger('WARN', req.method, req.url, 400, 'Validation failed');
-        return res.end(
-          JSON.stringify({
-            error: 'Некоректні дані',
-            details: validateBook.errors,
-          })
-        );
-      }
+  patchBook: async (request, reply) => {
+    const { id } = request.params;
 
-      const newBook = bookRepository.create(data);
-      res.statusCode = 201;
-      logger('INFO', req.method, req.url, 201);
-      res.end(JSON.stringify({ message: 'Created', book: newBook }));
-    } catch {
-      res.statusCode = 400;
-      logger('ERROR', req.method, req.url, 400, 'Invalid JSON');
-      res.end(JSON.stringify({ error: 'Invalid JSON' }));
+    if (request.body.id !== undefined) {
+      throw reply.badRequest(MESSAGES.FORBIDDEN_ID);
     }
-  },
 
-  patchBook: (req, res, id, body) => {
-    try {
-      const book = bookRepository.getById(id);
-      if (!book) {
-        res.statusCode = 404;
-        logger('WARN', req.method, req.url, 404, 'Book not found');
-        return res.end(JSON.stringify({ error: 'Not Found' }));
-      }
-
-      const updates = JSON.parse(body);
-      if (updates.id !== undefined) {
-        res.statusCode = 400;
-        logger('WARN', req.method, req.url, 400, 'Attempt to change ID');
-        return res.end(JSON.stringify({ error: 'Changing ID is forbidden' }));
-      }
-
-      const isValid = validatePatchBook(updates);
-      if (!isValid) {
-        res.statusCode = 400;
-        logger('WARN', req.method, req.url, 400, 'Patch validation failed');
-        return res.end(
-          JSON.stringify({
-            error: 'Некоректні дані для оновлення',
-            details: validatePatchBook.errors,
-          })
-        );
-      }
-
-      const updatedBook = bookRepository.update(id, updates);
-      res.statusCode = 200;
-      logger('INFO', req.method, req.url, 200);
-      res.end(JSON.stringify({ message: 'Updated', book: updatedBook }));
-    } catch {
-      res.statusCode = 400;
-      logger('ERROR', req.method, req.url, 400, 'Patch error');
-      res.end(JSON.stringify({ error: 'Error' }));
+    const updatedBook = bookRepository.update(id, request.body);
+    if (!updatedBook) {
+      throw reply.notFound(MESSAGES.NOT_FOUND);
     }
+
+    return reply.send({ message: "Updated", book: updatedBook });
   },
 
-  deleteBook: (req, res, id) => {
+  deleteBook: async (request, reply) => {
+    const { id } = request.params;
     const isDeleted = bookRepository.delete(id);
-    if (isDeleted) {
-      res.statusCode = 200;
-      logger('INFO', req.method, req.url, 200);
-      res.end(JSON.stringify({ message: 'Deleted' }));
-    } else {
-      res.statusCode = 404;
-      logger('WARN', req.method, req.url, 404, 'Book not found for deletion');
-      res.end(JSON.stringify({ error: 'Not Found' }));
+
+    if (!isDeleted) {
+      throw reply.notFound(MESSAGES.NOT_FOUND);
     }
-  },
+
+    return reply.send({ message: "Deleted" });
+  }
 };
 
-module.exports = bookController;
+export default bookController;

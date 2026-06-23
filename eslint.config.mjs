@@ -1,30 +1,29 @@
-import js from '@eslint/js';
-import prettier from 'eslint-plugin-prettier';
-import configPrettier from 'eslint-config-prettier';
-import globals from 'globals';
+import js from "@eslint/js";
+import prettier from "eslint-plugin-prettier";
+import configPrettier from "eslint-config-prettier";
+import globals from "globals";
 
 export default [
   js.configs.recommended,
   {
-    files: ['**/*.js'],
+    files: ["**/*.js"],
     languageOptions: {
-      sourceType: 'commonjs',
-      ecmaVersion: 'latest',
+      sourceType: "module",
+      ecmaVersion: "latest",
       globals: {
-        ...globals.node,
-        require: 'readonly',
-        module: 'readonly',
-      },
+        ...globals.node
+      }
     },
     plugins: {
-      prettier: prettier,
+      prettier: prettier
     },
     rules: {
-      'prettier/prettier': 'error',
-      'no-unused-vars': 'warn',
-      'no-console': 'off',
-      'no-undef': 'error',
-    },
+      "prettier/prettier": "error",
+      "no-unused-vars": "warn",
+      "no-console": "off",
+      "no-undef": "error",
+      "no-process-env": "error"
+    }
   },
-  configPrettier,
+  configPrettier
 ];
