@@ -7,7 +7,7 @@ export default async function bookRoutesV1(fastify) {
 
   fastify.post(
     "/api/v1/items",
-    { onRequest: [fastify.authenticateSession] },
+    { onRequest: [fastify.authenticateJwt] },
     async (request, reply) => {
       const newBook = await fastify.bookCacheService.createBook(request.body);
       return reply.status(201).send(newBook);
@@ -16,7 +16,7 @@ export default async function bookRoutesV1(fastify) {
 
   fastify.patch(
     "/api/v1/items/:id",
-    { onRequest: [fastify.authenticateSession] },
+    { onRequest: [fastify.authenticateJwt] },
     async (request) => {
       return fastify.bookCacheService.updateBook(
         request.params.id,
@@ -27,7 +27,7 @@ export default async function bookRoutesV1(fastify) {
 
   fastify.delete(
     "/api/v1/items/:id",
-    { onRequest: [fastify.authenticateSession] },
+    { onRequest: [fastify.authenticateJwt] },
     async (request) => {
       return fastify.bookCacheService.deleteBook(request.params.id);
     }

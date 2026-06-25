@@ -7,18 +7,18 @@ import fastifyWebsocket from "@fastify/websocket";
 import fastifyRedis from "@fastify/redis";
 import fastifyRateLimit from "@fastify/rate-limit";
 import fastifyCookie from "@fastify/cookie";
-import fastifySession from "@fastify/session";
-import RedisStore from "fastify-session-redis-store";
+import fastifyJwt from "@fastify/jwt";
 import path from "path";
 import { envSchema } from "#schemas/env.schema";
 import bookRoutes from "./routes/book.routes.js";
 import bookRoutesV1 from "./routes/book.routes.v1.js";
 import bookRoutesV2 from "./routes/book.routes.v2.js";
-import authRoutes from "./routes/auth.routes.js";
+import authJwtRoutes from "./routes/auth-jwt.routes.js";
 import mongoPlugin from "./db/mongo.js";
 import BookRepositoryPlugin from "./repositories/book.repository.js";
 import { createReferenceService } from "./utils/reference.utils.js";
 import { createBookCacheService } from "./utils/book-cache.utils.js";
+import { REDIS_KEYS } from "./utils/redis-keys.js";
 
 export const buildApp = async (opts = {}) => {
   const fastify = Fastify(opts);
@@ -45,19 +45,21 @@ export const buildApp = async (opts = {}) => {
   });
 
   await fastify.register(fastifyCookie);
-  await fastify.register(fastifySession, {
-    secret: fastify.config.SESSION_SECRET,
-    store: new RedisStore({ client: fastify.redis }),
-    cookie: {
-      httpOnly: true,
-      secure: fastify.config.NODE_ENV === "production",
-      maxAge: 86400000
-    },
-    saveUninitialized: false
+  await fastify.register(fastifyJwt, {
+    secret: fastify.config.JWT_SECRET,
+    trusted: async (request, decodedToken) => {
+      if (!decodedToken.jti) return true;
+      const isBlacklisted = await fastify.redis.get(
+        `${REDIS_KEYS.BLACKLIST_PREFIX}${decodedToken.jti}`
+      );
+      return !isBlacklisted;
+    }
   });
 
-  fastify.decorate("authenticateSession", async (request, reply) => {
-    if (!request.session.userId) {
+  fastify.decorate("authenticateJwt", async (request, reply) => {
+    try {
+      await request.jwtVerify();
+    } catch {
       return reply.code(401).send({ error: "Unauthorized" });
     }
   });
@@ -83,7 +85,6 @@ export const buildApp = async (opts = {}) => {
   fastify.decorate("referenceService", referenceService);
 
   const bookCacheService = createBookCacheService({
-    db: fastify.db,
     redis: fastify.redis,
     bookRepository: fastify.bookRepository
   });
@@ -92,7 +93,7 @@ export const buildApp = async (opts = {}) => {
   await fastify.register(bookRoutes);
   await fastify.register(bookRoutesV1);
   await fastify.register(bookRoutesV2);
-  await fastify.register(authRoutes);
+  await fastify.register(authJwtRoutes);
 
   return fastify;
 };
