@@ -4,11 +4,17 @@ import fastifySensible from "@fastify/sensible";
 import fastifyStatic from "@fastify/static";
 import fastifyMultipart from "@fastify/multipart";
 import fastifyWebsocket from "@fastify/websocket";
+import fastifyRedis from "@fastify/redis";
+import fastifyRateLimit from "@fastify/rate-limit";
 import path from "path";
 import { envSchema } from "#schemas/env.schema";
 import bookRoutes from "./routes/book.routes.js";
+import bookRoutesV1 from "./routes/book.routes.v1.js";
+import bookRoutesV2 from "./routes/book.routes.v2.js";
 import mongoPlugin from "./db/mongo.js";
 import BookRepositoryPlugin from "./repositories/book.repository.js";
+import { createReferenceService } from "./utils/reference.utils.js";
+import { createBookCacheService } from "./utils/book-cache.utils.js";
 
 export const buildApp = async (opts = {}) => {
   const fastify = Fastify(opts);
@@ -19,6 +25,20 @@ export const buildApp = async (opts = {}) => {
   });
 
   await fastify.after();
+
+  await fastify.register(fastifyRedis, {
+    host: fastify.config.REDIS_HOST,
+    port: fastify.config.REDIS_PORT,
+    closeClient: true
+  });
+
+  await fastify.after();
+
+  await fastify.register(fastifyRateLimit, {
+    max: 100,
+    timeWindow: "1 minute",
+    redis: fastify.redis
+  });
 
   await fastify.register(fastifySensible);
 
@@ -34,12 +54,22 @@ export const buildApp = async (opts = {}) => {
   });
 
   await fastify.register(fastifyWebsocket);
-
   await fastify.register(mongoPlugin);
-
   await fastify.register(BookRepositoryPlugin);
 
+  const referenceService = createReferenceService({ redis: fastify.redis });
+  fastify.decorate("referenceService", referenceService);
+
+  const bookCacheService = createBookCacheService({
+    db: fastify.db,
+    redis: fastify.redis,
+    bookRepository: fastify.bookRepository
+  });
+  fastify.decorate("bookCacheService", bookCacheService);
+
   await fastify.register(bookRoutes);
+  await fastify.register(bookRoutesV1);
+  await fastify.register(bookRoutesV2);
 
   return fastify;
 };
