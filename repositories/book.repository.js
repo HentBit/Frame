@@ -1,34 +1,29 @@
-import { eq } from "drizzle-orm";
-import { books } from "../db/schema.js";
+import fp from "fastify-plugin";
+import { BookModel } from "../db/models/book.model.js";
 
-class BookRepository {
-  constructor(drizzleDb) {
-    this.db = drizzleDb;
-  }
+async function bookRepositoryPlugin(fastify) {
+  const repository = {
+    findAll: async () => {
+      return await BookModel.find().lean();
+    },
+    findById: async (id) => {
+      return await BookModel.findById(id).lean();
+    },
+    create: async (data) => {
+      return await BookModel.create(data);
+    },
+    update: async (id, data) => {
+      return await BookModel.findByIdAndUpdate(id, data, { new: true }).lean();
+    },
+    delete: async (id) => {
+      const result = await BookModel.findByIdAndDelete(id);
+      return !!result;
+    }
+  };
 
-  async findAll() {
-    return this.db.select().from(books);
-  }
-
-  async findById(id) {
-    const result = await this.db.select().from(books).where(eq(books.id, id));
-    return result.length ? result[0] : null;
-  }
-
-  async create(data) {
-    const [result] = await this.db.insert(books).values(data);
-    return { id: result.insertId, ...data };
-  }
-
-  async update(id, data) {
-    await this.db.update(books).set(data).where(eq(books.id, id));
-    return this.findById(id);
-  }
-
-  async delete(id) {
-    const result = await this.db.delete(books).where(eq(books.id, id));
-    return result.affectedRows > 0;
-  }
+  fastify.decorate("bookRepository", repository);
 }
 
-export default BookRepository;
+export default fp(bookRepositoryPlugin, {
+  name: "book-repository-plugin"
+});

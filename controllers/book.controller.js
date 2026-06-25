@@ -1,21 +1,14 @@
-import fs from "fs/promises";
-import path from "path";
 import { createWriteStream } from "fs";
 import { pipeline } from "stream/promises";
+import { Readable, Transform } from "stream";
 import { stringify } from "csv-stringify/sync";
 import { parse } from "csv-parse/sync";
-import Ajv from "ajv";
-import bookRepository from "#repositories/book.repository";
-import { bookCoreProperties } from "#schemas/book.schema";
+import fs from "fs/promises";
+import path from "path";
 import { buildImageUrl } from "#utils/url.utils";
 import { MESSAGES } from "#constants/messages";
-
-const ajv = new Ajv({ coerceTypes: true, useDefaults: true });
-const validateImportItem = ajv.compile({
-  type: "object",
-  required: ["title", "author", "year", "genre"],
-  properties: bookCoreProperties
-});
+import { BookAgeTransform } from "../transforms/book-age.transform.js";
+import eventBus, { BOOK_EVENTS } from "../utils/event-bus.js";
 
 const cachePath = path.join(process.cwd(), "data", "cache", "reference.json");
 const CACHE_TTL_MS = 120 * 1000;
@@ -31,7 +24,7 @@ const fetchGenreWithRetryAndTimeout = async (genreName) => {
       return cacheData.data[genreName];
     }
   } catch {
-    /* ігноруємо відсутність або пошкодження файлу кешу */
+    /* ігноруємо */
   }
 
   const url = `http://127.0.0.1:3001/genres`;
@@ -45,7 +38,6 @@ const fetchGenreWithRetryAndTimeout = async (genreName) => {
     try {
       const response = await fetch(url, { signal: controller.signal });
       clearTimeout(timer);
-
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const genres = await response.json();
@@ -60,20 +52,18 @@ const fetchGenreWithRetryAndTimeout = async (genreName) => {
           const raw = await fs.readFile(cachePath, "utf8");
           existingCache = JSON.parse(raw);
         } catch {
-          /* ігноруємо помилку читання старого файлу кешу */
+          /* ігноруємо */
         }
 
         existingCache.timestamp = Date.now();
-        if (matchedGenre) {
-          existingCache.data[genreName] = matchedGenre;
-        }
+        if (matchedGenre) existingCache.data[genreName] = matchedGenre;
         await fs.writeFile(
           cachePath,
           JSON.stringify(existingCache, null, 2),
           "utf8"
         );
       } catch {
-        /* ігноруємо невдалий запис кешу на диск */
+        /* ігноруємо */
       }
 
       return matchedGenre;
@@ -81,14 +71,14 @@ const fetchGenreWithRetryAndTimeout = async (genreName) => {
       clearTimeout(timer);
       lastError = error;
       if (attempt < retries - 1) {
-        const delay = 1000 * Math.pow(2, attempt);
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1000 * Math.pow(2, attempt))
+        );
       }
     }
   }
-
   console.error(
-    `[FETCH ERROR] Сервіс жанрів недоступний після спроб: ${lastError?.message}`
+    `[FETCH ERROR] Сервіс жанрів недоступний: ${lastError?.message}`
   );
   return null;
 };
@@ -96,25 +86,14 @@ const fetchGenreWithRetryAndTimeout = async (genreName) => {
 const bookController = {
   getHealth: async (request, reply) => reply.send({ status: "ok" }),
 
-  getHealthDetails: async (request, reply) =>
-    reply.send({
-      pid: process.pid,
-      nodeVersion: process.version,
-      platform: process.platform,
-      uptime: Math.floor(process.uptime()),
-      memoryUsage: process.memoryUsage()
-    }),
-
   getBooks: async (request, reply) => {
     const { author } = request.query;
-    let books = await bookRepository.findAll();
-
+    let books = await request.server.bookRepository.findAll();
     if (author) {
       books = books.filter(
         (b) => b.author.toLowerCase() === author.toLowerCase()
       );
     }
-
     const items = books.map((b) => ({
       ...b,
       image: buildImageUrl(request, b.image)
@@ -125,41 +104,34 @@ const bookController = {
   getBooksV2: async (request, reply) => {
     const page = parseInt(request.query.page || 1, 10);
     const limit = parseInt(request.query.limit || 10, 10);
-
-    const allBooks = await bookRepository.findAll();
+    const allBooks = await request.server.bookRepository.findAll();
     const total = allBooks.length;
-    const totalPages = Math.ceil(total / limit);
-
     const startIndex = (page - 1) * limit;
     const paginatedBooks = allBooks.slice(startIndex, startIndex + limit);
 
-    const data = paginatedBooks.map((b) => ({
-      ...b,
-      image: buildImageUrl(request, b.image)
-    }));
-
     return reply.send({
-      data,
-      meta: { total, page, limit, totalPages }
+      data: paginatedBooks.map((b) => ({
+        ...b,
+        image: buildImageUrl(request, b.image)
+      })),
+      meta: { total, page, limit, totalPages: Math.ceil(total / limit) }
     });
   },
 
   getBookDetails: async (request, reply) => {
     const { id } = request.params;
-    const book = await bookRepository.findById(id);
+    const book = await request.server.bookRepository.findById(id);
     if (!book) throw reply.notFound(MESSAGES.NOT_FOUND);
-
-    const genreDetails = await fetchGenreWithRetryAndTimeout(book.genre);
-
     return reply.send({
       ...book,
       image: buildImageUrl(request, book.image),
-      genreDetails
+      genreDetails: await fetchGenreWithRetryAndTimeout(book.genre)
     });
   },
 
   createBook: async (request, reply) => {
-    const book = await bookRepository.create(request.body);
+    const book = await request.server.bookRepository.create(request.body);
+    eventBus.emit(BOOK_EVENTS.CREATED, book);
     return reply.status(201).send({
       message: "Created",
       book: { ...book, image: buildImageUrl(request, book.image) }
@@ -171,9 +143,10 @@ const bookController = {
     if (request.body.id !== undefined)
       throw reply.badRequest(MESSAGES.FORBIDDEN_ID);
 
-    const book = await bookRepository.update(id, request.body);
+    const book = await request.server.bookRepository.update(id, request.body);
     if (!book) throw reply.notFound(MESSAGES.NOT_FOUND);
 
+    eventBus.emit(BOOK_EVENTS.UPDATED, book);
     return reply.send({
       message: "Updated",
       book: { ...book, image: buildImageUrl(request, book.image) }
@@ -181,27 +154,94 @@ const bookController = {
   },
 
   deleteBook: async (request, reply) => {
-    const isDeleted = await bookRepository.delete(request.params.id);
+    const isDeleted = await request.server.bookRepository.delete(
+      request.params.id
+    );
     if (!isDeleted) throw reply.notFound(MESSAGES.NOT_FOUND);
+
+    eventBus.emit(BOOK_EVENTS.DELETED, request.params.id);
     return reply.send({ message: "Deleted" });
   },
 
   exportCSV: async (request, reply) => {
-    const books = await bookRepository.findAll();
-    const mapped = books.map((b) => ({
-      id: b.id,
-      title: b.title,
-      author: b.author,
-      year: b.year,
-      genre: b.genre,
-      image: b.image ? buildImageUrl(request, b.image) : ""
-    }));
+    const useTransform = request.query.transform === "true";
+    const books = await request.server.bookRepository.findAll();
+    const readableStream = Readable.from(books);
 
-    const csvData = stringify(mapped, { header: true });
-    return reply
+    const csvStringifier = new Transform({
+      objectMode: true,
+      transform(book, encoding, callback) {
+        const row = {
+          id: book.id,
+          title: book.title,
+          author: book.author,
+          year: book.year,
+          genre: book.genre,
+          image: book.image || "",
+          ...(book.age !== undefined ? { age: book.age } : {})
+        };
+        callback(null, stringify([row], { header: false }));
+      }
+    });
+
+    reply
       .header("Content-Disposition", 'attachment; filename="books.csv"')
-      .type("text/csv")
-      .send(csvData);
+      .type("text/csv");
+
+    const headers = useTransform
+      ? "id,title,author,year,genre,image,age\n"
+      : "id,title,author,year,genre,image\n";
+    reply.raw.write(headers);
+
+    if (useTransform) {
+      const ageTransform = new BookAgeTransform();
+      await pipeline(readableStream, ageTransform, csvStringifier, reply.raw);
+    } else {
+      await pipeline(readableStream, csvStringifier, reply.raw);
+    }
+  },
+
+  streamBooks: async (request, reply) => {
+    const books = await request.server.bookRepository.findAll();
+    const readableStream = Readable.from(books);
+
+    const ndjsonTransform = new Transform({
+      objectMode: true,
+      transform(book, encoding, callback) {
+        callback(null, JSON.stringify(book) + "\n");
+      }
+    });
+
+    reply.type("application/x-ndjson");
+    await pipeline(readableStream, ndjsonTransform, reply.raw);
+  },
+
+  getBackupFile: async (request, reply) => {
+    const apiKey = request.headers["x-api-key"];
+    if (apiKey !== "super-secret-key") {
+      throw reply.unauthorized("Невірний або відсутній API-ключ у заголовках");
+    }
+
+    const { timestamp } = request.params;
+    const backupFilePath = path.join(
+      process.cwd(),
+      "data",
+      "backups",
+      `${timestamp}.gz`
+    );
+
+    try {
+      await fs.access(backupFilePath);
+    } catch {
+      throw reply.notFound("Бекап файл з таким таймстампом не знайдено");
+    }
+
+    reply
+      .header("Content-Disposition", `attachment; filename="${timestamp}.gz"`)
+      .type("application/gzip");
+
+    const fileStream = Readable.from(await fs.readFile(backupFilePath));
+    await pipeline(fileStream, reply.raw);
   },
 
   importData: async (request, reply) => {
@@ -225,17 +265,8 @@ const bookController = {
 
     for (let i = 0; i < rawItems.length; i++) {
       const item = rawItems[i];
-      const valid = validateImportItem(item);
-
-      if (!valid) {
-        rejected.push({
-          row: i + 1,
-          reason: ajv.errorsText(validateImportItem.errors)
-        });
-      } else {
-        await bookRepository.create(item);
-        imported++;
-      }
+      await request.server.bookRepository.create(item);
+      imported++;
     }
 
     return reply.send({ imported, rejectedCount: rejected.length, rejected });
@@ -243,7 +274,7 @@ const bookController = {
 
   uploadImage: async (request, reply) => {
     const { id } = request.params;
-    const book = await bookRepository.findById(id);
+    const book = await request.server.bookRepository.findById(id);
     if (!book) throw reply.notFound(MESSAGES.NOT_FOUND);
 
     const data = await request.file({ limits: { fileSize: 5 * 1024 * 1024 } });
@@ -262,7 +293,7 @@ const bookController = {
     await pipeline(data.file, createWriteStream(targetPath));
 
     const relativePath = `/uploads/${id}/${filename}`;
-    await bookRepository.update(id, { image: relativePath });
+    await request.server.bookRepository.update(id, { image: relativePath });
 
     return reply.send({
       message: "Image uploaded successfully",
@@ -280,12 +311,11 @@ const bookController = {
     );
     if (!contributorsRes.ok)
       throw reply.badRequest(
-        `Не вдалося отримати дані репозиторію: ${contributorsRes.status}`
+        `Не вдалося отримати дані: ${contributorsRes.status}`
       );
 
     const contributors = await contributorsRes.json();
     const usernames = contributors.map((c) => c.login);
-
     const repoScores = {};
 
     for (const username of usernames) {
@@ -303,7 +333,7 @@ const bookController = {
           }
         }
       } catch {
-        /* ігноруємо помилки індивідуальних користувачів */
+        /* ігноруємо */
       }
     }
 
@@ -332,12 +362,11 @@ const bookController = {
     );
     if (!contributorsRes.ok)
       throw reply.badRequest(
-        `Не вдалося отримати дані репозиторію: ${contributorsRes.status}`
+        `Не вдалося отримати дані: ${contributorsRes.status}`
       );
 
     const contributors = await contributorsRes.json();
     const usernames = contributors.map((c) => c.login);
-
     const repoScores = {};
 
     await Promise.all(
@@ -356,7 +385,7 @@ const bookController = {
             }
           }
         } catch {
-          /* ігноруємо індивідуальні помилки з мережею у паралельних потоках */
+          /* ігноруємо */
         }
       })
     );

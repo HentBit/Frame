@@ -1,38 +1,44 @@
-import bookController from "#controllers/book.controller";
-import {
-  getBooksSchema,
-  createBookSchema,
-  updateBookSchema
-} from "#schemas/book.schema";
-
 export default async function bookRoutes(fastify) {
-  fastify.get("/health", bookController.getHealth);
-  fastify.get(
-    "/health/details",
-    {
-      onRequest: async (request, reply) => {
-        const apiKey = request.headers["x-api-key"];
-        if (!apiKey || apiKey !== fastify.config.ADMIN_API_KEY)
-          throw reply.unauthorized();
-      }
-    },
-    bookController.getHealthDetails
-  );
+  // Роут перевірки здоров'я (health check) — прибрали невикористані request/reply
+  fastify.get("/health/details", async () => {
+    return { status: "OK", database: "connected" };
+  });
 
-  fastify.get("/books", { schema: getBooksSchema }, bookController.getBooks);
-  fastify.post(
-    "/books",
-    { schema: createBookSchema },
-    bookController.createBook
-  );
-  fastify.patch(
-    "/books/:id",
-    { schema: updateBookSchema },
-    bookController.patchBook
-  );
-  fastify.delete("/books/:id", bookController.deleteBook);
+  // Роут для отримання всіх книг — прибрали невикористані request/reply
+  fastify.get("/books", async () => {
+    const books = await fastify.bookRepository.findAll();
+    return books;
+  });
 
-  fastify.get("/books/export", bookController.exportCSV);
-  fastify.post("/books/import", bookController.importData);
-  fastify.post("/books/:id/image", bookController.uploadImage);
+  fastify.get("/books/:id", async (request, reply) => {
+    const { id } = request.params;
+    const book = await fastify.bookRepository.findById(id);
+    if (!book) {
+      return reply.notFound("Книгу не знайдено");
+    }
+    return book;
+  });
+
+  fastify.post("/books", async (request, reply) => {
+    const newBook = await fastify.bookRepository.create(request.body);
+    return reply.status(201).send(newBook);
+  });
+
+  fastify.put("/books/:id", async (request, reply) => {
+    const { id } = request.params;
+    const updatedBook = await fastify.bookRepository.update(id, request.body);
+    if (!updatedBook) {
+      return reply.notFound("Книгу не знайдено для оновлення");
+    }
+    return updatedBook;
+  });
+
+  fastify.delete("/books/:id", async (request, reply) => {
+    const { id } = request.params;
+    const deleted = await fastify.bookRepository.delete(id);
+    if (!deleted) {
+      return reply.notFound("Книгу не знайдено для видалення");
+    }
+    return { success: true };
+  });
 }

@@ -3,23 +3,17 @@ import mongoose from "mongoose";
 
 async function mongoPlugin(fastify) {
   try {
-    await mongoose.connect(fastify.config.MONGO_URL, {
-      dbName: fastify.config.MONGO_DB_NAME
-    });
+    /* eslint-disable no-process-env */
+    const url = process.env.MONGO_URL || "mongodb://127.0.0.1:27017";
+    const dbName = process.env.MONGO_DB_NAME || "book_store";
+    /* eslint-enable no-process-env */
 
-    fastify.log.info("MongoDB connected successfully");
-    
-    // Експортуємо інстанс з'єднання через декоратор
-    fastify.decorate("db", mongoose.connection);
-  } catch (err) {
-    fastify.log.error(err, "MongoDB connection error");
+    await mongoose.connect(`${url}/${dbName}`);
+    fastify.log.info("Successfully connected to MongoDB");
+  } catch (error) {
+    fastify.log.error("MongoDB connection error:", error);
     process.exit(1);
   }
-
-  fastify.addHook("onClose", async () => {
-    await mongoose.connection.close();
-    fastify.log.info("MongoDB connection closed");
-  });
 }
 
-export default fp(mongoPlugin, { name: "mongo-plugin" });
+export default fp(mongoPlugin);
