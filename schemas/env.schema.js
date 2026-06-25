@@ -1,10 +1,12 @@
 export const envSchema = {
   type: "object",
-  required: ["PORT", "HOSTNAME", "NODE_ENV", "ADMIN_API_KEY"],
+  required: ["PORT", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_DB"],
   properties: {
     PORT: { type: "integer", default: 3000 },
-    HOSTNAME: { type: "string", default: "127.0.0.1" },
-    NODE_ENV: { type: "string", enum: ["development", "production"] },
-    ADMIN_API_KEY: { type: "string" }
+    MYSQL_HOST: { type: "string" },
+    MYSQL_PORT: { type: "integer", default: 3306 },
+    MYSQL_USER: { type: "string" },
+    MYSQL_PASSWORD: { type: "string" },
+    MYSQL_DB: { type: "string" }
   }
 };

@@ -1,72 +1,64 @@
-import fs from "fs/promises";
-import path from "path";
-import { BookModel } from "#models/book.model";
-import { writeAtomic } from "#utils/fs.utils";
+import { BookModel } from "../db/models/book.model.js";
 
-const itemsDir = path.join(process.cwd(), "data", "items");
+class BookRepository {
+  constructor(db) {
+    this.db = db; // Передаємо з'єднання через Dependency Injection
+  }
 
-const bookRepository = {
-  findAll: async () => {
+  _mapId(doc) {
+    if (!doc) return null;
+    const { _id, ...rest } = doc;
+    return { id: _id.toString(), ...rest };
+  }
+
+  async findAll() {
+    const docs = await BookModel.find({}).lean();
+    return docs.map(this._mapId);
+  }
+
+  async findById(id) {
     try {
-      const files = await fs.readdir(itemsDir);
-      const jsonFiles = files.filter((f) => f.endsWith(".json"));
-      const books = [];
-
-      for (const file of jsonFiles) {
-        const content = await fs.readFile(path.join(itemsDir, file), "utf8");
-        books.push(JSON.parse(content));
-      }
-      return books.sort((a, b) => a.id - b.id);
-    } catch {
-      return [];
-    }
-  },
-
-  findById: async (id) => {
-    try {
-      const filePath = path.join(itemsDir, `${id}.json`);
-      const content = await fs.readFile(filePath, "utf8");
-      return JSON.parse(content);
+      const doc = await BookModel.findById(id).lean();
+      return this._mapId(doc);
     } catch {
       return null;
     }
-  },
+  }
 
-  create: async (bookData) => {
-    const books = await bookRepository.findAll();
-    const lastId = books.length > 0 ? books[books.length - 1].id : 0;
-    const newId = lastId + 1;
+  async create(data) {
+    const doc = await BookModel.create(data);
+    return this._mapId(doc.toObject());
+  }
 
-    const newBook = { id: newId };
-    for (const key of Object.keys(BookModel)) {
-      newBook[key] =
-        bookData[key] !== undefined ? bookData[key] : BookModel[key];
-    }
-
-    const filePath = path.join(itemsDir, `${newId}.json`);
-    await writeAtomic(filePath, newBook);
-    return newBook;
-  },
-
-  update: async (id, updates) => {
-    const book = await bookRepository.findById(id);
-    if (!book) return null;
-
-    const updatedBook = { ...book, ...updates };
-    const filePath = path.join(itemsDir, `${id}.json`);
-    await writeAtomic(filePath, updatedBook);
-    return updatedBook;
-  },
-
-  delete: async (id) => {
+  async update(id, data) {
     try {
-      const filePath = path.join(itemsDir, `${id}.json`);
-      await fs.unlink(filePath);
-      return true;
+      const doc = await BookModel.findByIdAndUpdate(
+        id,
+        { $set: data },
+        { new: true }
+      ).lean();
+      return this._mapId(doc);
+    } catch {
+      return null;
+    }
+  }
+
+  async delete(id) {
+    try {
+      const result = await BookModel.findByIdAndDelete(id);
+      return !!result;
     } catch {
       return false;
     }
   }
-};
 
-export default bookRepository;
+  async count() {
+    return BookModel.countDocuments({});
+  }
+
+  async clear() {
+    await BookModel.deleteMany({});
+  }
+}
+
+export default BookRepository;

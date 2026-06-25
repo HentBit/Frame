@@ -30,6 +30,7 @@
     "format:check": "prettier --check .",
     "check": "npm run lint && npm run format:check",
     "seed": "node scripts/seed.js",
+    "seed:force": "node db/seed.js --force",
     "migrate": "node migrations/migrate.js",
     "external": "json-server db.json --port 3001"
   },
@@ -45,7 +46,9 @@
     "@fastify/swagger-ui": "^6.0.0",
     "csv-parse": "^5.6.0",
     "csv-stringify": "^6.5.2",
-    "fastify": "^5.2.1"
+    "fastify": "^5.2.1",
+    "fastify-plugin": "^6.0.0",
+    "mysql2": "^3.22.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",
