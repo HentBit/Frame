@@ -1,22 +1,35 @@
-import bookController from "#controllers/book.controller";
-import { getBooksSchema, createBookSchema, updateBookSchema, getBookDetailsSchema } from "#schemas/book.schema";
-
 export default async function bookRoutesV1(fastify) {
-  fastify.get("/health", bookController.getHealth);
-  fastify.get("/books", { schema: getBooksSchema }, bookController.getBooks);
-  
-  // 1. Потоковий NDJSON маршрут (Пункт 4)
-  fastify.get("/books/stream", bookController.streamBooks);
-  
-  fastify.get("/books/:id/details", { schema: getBookDetailsSchema }, bookController.getBookDetails);
-  fastify.post("/books", { schema: createBookSchema }, bookController.createBook);
-  fastify.patch("/books/:id", { schema: updateBookSchema }, bookController.patchBook);
-  fastify.delete("/books/:id", bookController.deleteBook);
-  fastify.get("/books/export", bookController.exportCSV);
-  fastify.post("/books/import", bookController.importData);
-  fastify.post("/books/:id/image", bookController.uploadImage);
-  
-  fastify.get("/backups/:timestamp", bookController.getBackupFile);
+  fastify.get("/api/v1/items", async (request) => {
+    const page = Number(request.query.page) || 1;
+    const limit = Number(request.query.limit) || 10;
+    return fastify.bookCacheService.listBooksCached(page, limit);
+  });
 
-  fastify.get("/github/shared-repos", bookController.getSharedReposV1);
+  fastify.post(
+    "/api/v1/items",
+    { onRequest: [fastify.authenticateSession] },
+    async (request, reply) => {
+      const newBook = await fastify.bookCacheService.createBook(request.body);
+      return reply.status(201).send(newBook);
+    }
+  );
+
+  fastify.patch(
+    "/api/v1/items/:id",
+    { onRequest: [fastify.authenticateSession] },
+    async (request) => {
+      return fastify.bookCacheService.updateBook(
+        request.params.id,
+        request.body
+      );
+    }
+  );
+
+  fastify.delete(
+    "/api/v1/items/:id",
+    { onRequest: [fastify.authenticateSession] },
+    async (request) => {
+      return fastify.bookCacheService.deleteBook(request.params.id);
+    }
+  );
 }

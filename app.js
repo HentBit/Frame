@@ -6,11 +6,15 @@ import fastifyMultipart from "@fastify/multipart";
 import fastifyWebsocket from "@fastify/websocket";
 import fastifyRedis from "@fastify/redis";
 import fastifyRateLimit from "@fastify/rate-limit";
+import fastifyCookie from "@fastify/cookie";
+import fastifySession from "@fastify/session";
+import RedisStore from "fastify-session-redis-store";
 import path from "path";
 import { envSchema } from "#schemas/env.schema";
 import bookRoutes from "./routes/book.routes.js";
 import bookRoutesV1 from "./routes/book.routes.v1.js";
 import bookRoutesV2 from "./routes/book.routes.v2.js";
+import authRoutes from "./routes/auth.routes.js";
 import mongoPlugin from "./db/mongo.js";
 import BookRepositoryPlugin from "./repositories/book.repository.js";
 import { createReferenceService } from "./utils/reference.utils.js";
@@ -38,6 +42,24 @@ export const buildApp = async (opts = {}) => {
     max: 100,
     timeWindow: "1 minute",
     redis: fastify.redis
+  });
+
+  await fastify.register(fastifyCookie);
+  await fastify.register(fastifySession, {
+    secret: fastify.config.SESSION_SECRET,
+    store: new RedisStore({ client: fastify.redis }),
+    cookie: {
+      httpOnly: true,
+      secure: fastify.config.NODE_ENV === "production",
+      maxAge: 86400000
+    },
+    saveUninitialized: false
+  });
+
+  fastify.decorate("authenticateSession", async (request, reply) => {
+    if (!request.session.userId) {
+      return reply.code(401).send({ error: "Unauthorized" });
+    }
   });
 
   await fastify.register(fastifySensible);
@@ -70,6 +92,7 @@ export const buildApp = async (opts = {}) => {
   await fastify.register(bookRoutes);
   await fastify.register(bookRoutesV1);
   await fastify.register(bookRoutesV2);
+  await fastify.register(authRoutes);
 
   return fastify;
 };

@@ -5,4 +5,5 @@ export const REDIS_KEYS = {
   REFRESH_PREFIX: "refresh:"
 };
 
-export const getItemsCacheKey = (page, limit) => `${REDIS_KEYS.ITEMS_PREFIX}page:${page}:limit:${limit}`;
+export const getItemsCacheKey = (page, limit) =>
+  `${REDIS_KEYS.ITEMS_PREFIX}page:${page}:limit:${limit}`;

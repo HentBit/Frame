@@ -1,6 +1,6 @@
 import { REDIS_KEYS, getItemsCacheKey } from "./redis-keys.js";
 
-export function createBookCacheService({ db, redis, bookRepository }) {
+export function createBookCacheService({ redis, bookRepository }) {
   async function invalidateCache() {
     const keys = await redis.keys(`${REDIS_KEYS.ITEMS_PREFIX}*`);
     if (keys.length > 0) {
