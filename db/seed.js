@@ -1,32 +1,35 @@
-import { BookModel } from "./models/book.model.js";
-import mongoose from "mongoose";
+import { drizzle } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
+import { books } from "./schema.js";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const initialBooks = [
-  { title: "The Hobbit", author: "J.R.R. Tolkien", year: 1937, genre: "Fantasy" },
-  { title: "1984", author: "George Orwell", year: 1949, genre: "Dystopian" }
-];
-
 async function seed() {
   const force = process.argv.includes("--force");
-  await mongoose.connect(process.env.MONGO_URL, { dbName: process.env.MONGO_DB_NAME });
+  const connection = await mysql.createConnection({
+    host: process.env.MYSQL_HOST,
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DB
+  });
+
+  const db = drizzle(connection);
 
   if (force) {
-    await BookModel.deleteMany({});
-    console.log("Database cleared forces.");
+    await connection.execute("SET FOREIGN_KEY_CHECKS = 0;");
+    await connection.execute("TRUNCATE TABLE books;");
+    await connection.execute("SET FOREIGN_KEY_CHECKS = 1;");
+    console.log("Database cleared via Drizzle.");
   }
 
-  const count = await BookModel.countDocuments({});
-  if (count === 0 || force) {
-    await BookModel.insertMany(initialBooks);
-    console.log("Database seeded successfully!");
-  } else {
-    console.log("Database already has data. Skipping seed.");
-  }
+  await db.insert(books).values([
+    { title: "The Hobbit", author: "J.R.R. Tolkien", year: 1937, genre: "Fantasy" },
+    { title: "1984", author: "George Orwell", year: 1949, genre: "Dystopian" }
+  ]);
 
-  await mongoose.connection.close();
+  console.log("Database seeded via Drizzle.");
+  await connection.end();
 }
 
 seed().catch(console.error);
